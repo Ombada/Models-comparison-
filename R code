@@ -1,0 +1,273 @@
+library(brms)
+library(bridgesampling)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+#--------------------1. comparing nested models----------
+# Simulate data
+set.seed(123)
+n <- 100
+x <- rnorm(n)
+z <- rnorm(n)
+# z has no effect on y
+y <- 1 + 2 * x + 0 * z + rnorm(n, sd = 1)  
+
+data_df <- data.frame(y, x, z)
+
+# Fit Bayesian Regression Models using Stan C++ 
+
+# Model 1: y ~ x
+fit1 <- brm(y ~ x, data = data_df,
+            chains = 2, iter = 2000, warmup = 1000,
+            save_pars = save_pars(all = TRUE),
+            refresh = 0)
+# Model 1: y ~ x + z
+fit2 <- brm(y ~ x + z, data = data_df,
+            chains = 2, iter = 2000, warmup = 1000,
+            save_pars = save_pars(all = TRUE),
+            refresh = 0)
+
+
+# Compute marginal likelihoods using bridge sampling
+bridge1 <- bridge_sampler(fit1)
+bridge2 <- bridge_sampler(fit2)
+
+
+# Bayes Factor (m1 vs m2)
+bridgesampling::bf(bridge1, bridge2)
+# Estimated Bayes factor in favor of bridge1 over bridge2: 1.07554
+# the models are almost equally supported by the data, and adding variable z does not provide much extra explanatory power
+
+#--------------------2. Linear Vs Quadratic----------
+set.seed(123)
+n <- 100
+x <- rnorm(n)
+y <- 1 + 2 * x + 1.5 * x^2 + rnorm(n, sd = 1)
+df <- data.frame(x = x, x2 = x^2, y = y)
+# Linear model
+fit_linear <- brm(
+  y ~ x,
+  data = df,
+  chains = 2, iter = 2000, warmup = 1000,
+  save_pars = save_pars(all = TRUE),
+  refresh = 0
+)
+
+# Quadratic model
+fit_quadratic <- brm(
+  y ~ x + I(x^2),  # or use x2 if you prefer
+  data = df,
+  chains = 2, iter = 2000, warmup = 1000,
+  save_pars = save_pars(all = TRUE),
+  refresh = 0
+)
+
+# Compute marginal likelihoods using bridge sampling
+bridge_lin <- bridge_sampler(fit_linear)
+bridge_quad <- bridge_sampler(fit_quadratic)
+
+# Bayes Factor 
+bridgesampling::bf(bridge_quad, bridge_lin)
+# Estimated Bayes factor in favor of bridge_quad over bridge_lin: 1326392566269610933120202240.00000
+
+# extract numeric Bayes factor value
+bf_value <- bridgesampling::bf(bridge_quad, bridge_lin)$bf  
+# compute base-10 log
+log10(bf_value)
+# 27.12267
+
+# Plot the fitted models
+# Create a grid of x values for smooth curve
+newdata <- data.frame(x = seq(min(df$x), max(df$x), length.out = 200))
+
+# Get predictions from linear model
+pred_linear <- fitted(fit_linear, newdata = newdata, probs = c(0.025, 0.975))
+pred_linear_df <- cbind(newdata, as.data.frame(pred_linear))
+pred_linear_df$model <- "Linear"
+
+# Get predictions from quadratic model
+pred_quad <- fitted(fit_quadratic, newdata = newdata, probs = c(0.025, 0.975))
+pred_quad_df <- cbind(newdata, as.data.frame(pred_quad))
+pred_quad_df$model <- "Quadratic"
+
+# Combine predictions into one data frame
+pred_df <- bind_rows(pred_linear_df, pred_quad_df)
+
+library(ggplot2)
+
+# Plot original data points
+p <- ggplot(df, aes(x = x, y = y)) +
+  geom_point(alpha = 0.5)
+
+# Add fitted lines from the two models
+p <- p +
+  geom_line(data = pred_df, aes(x = x, y = Estimate, color = model), linewidth = 1) +
+  labs(title = "Fitted Linear vs Quadratic Models",
+       x = "x",
+       y = "y") +
+  theme_minimal() +
+  scale_color_manual(values = c("blue", "red"),
+                     name = "Model",
+                     labels = c("Linear", "Quadratic"))
+
+print(p)
+
+
+#--------------------3. Real data (normal, t, gamma, lognormal) ------
+data("mtcars")
+head(mtcars)
+str(mtcars)
+
+# Fit with normal distribution
+model_normal <- brm(mpg ~ wt + hp,
+                    data = mtcars,
+                    family = gaussian(),
+                    save_pars = save_pars(all = TRUE),
+                    chains = 2, iter = 2000, seed = 123)
+
+# Fit with student-t distribution
+model_student <- brm(mpg ~ wt + hp,
+                     data = mtcars,
+                     family = student(),
+                     save_pars = save_pars(all = TRUE),
+                     chains = 2, iter = 2000, seed = 123)
+# Fit with gamma distribution
+model_gamma <- brm(mpg ~ wt + hp,
+                  data = mtcars,
+                  family = Gamma(link = "log"), 
+                  save_pars = save_pars(all = TRUE),
+                  chains = 2, iter = 2000, seed = 123)
+
+
+# Fit with lognormal distribution
+model_lognormal <- brm(mpg ~ wt + hp,
+                       data = mtcars,
+                       family = lognormal(),
+                       save_pars = save_pars(all = TRUE),
+                       chains = 2, iter = 2000, seed = 123)
+
+bridge_normal <- bridge_sampler(model_normal)
+bridge_student <- bridge_sampler(model_student)
+bridge_gamma <- bridge_sampler(model_gamma)
+bridge_lognormal <- bridge_sampler(model_lognormal)
+
+# Compare via Bayes factor
+bridgesampling::bf(bridge_student, bridge_normal)
+#Estimated Bayes factor in favor of bridge_student over bridge_normal: 1.17586
+bridgesampling::bf(bridge_gamma, bridge_normal)
+#Estimated Bayes factor in favor of bridge_gamma over bridge_normal: 0.00155
+bridgesampling::bf(bridge_lognormal, bridge_normal)
+#Estimated Bayes factor in favor of bridge_lognormal over bridge_normal: 0.00846
+bridgesampling::bf(bridge_lognormal, bridge_gamma)
+#Estimated Bayes factor in favor of bridge_lognormal over bridge_gamma: 5.45696
+bridgesampling::bf(bridge_lognormal, bridge_student)
+#Estimated Bayes factor in favor of bridge_lognormal over bridge_student: 0.00720
+
+library(ggplot2)
+
+# Create prediction grid
+newdata <- mtcars
+newdata$pred_normal     <- fitted(model_normal)[, "Estimate"]
+newdata$pred_student    <- fitted(model_student)[, "Estimate"]
+newdata$pred_gamma      <- fitted(model_gamma)[, "Estimate"]
+newdata$pred_lognormal  <- fitted(model_lognormal)[, "Estimate"]
+
+
+ggplot(newdata, aes(x = mpg, y = pred_normal)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  labs(title = "Normal Model: Actual vs Fitted")
+
+ggplot(newdata, aes(x = mpg, y = pred_student)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "blue") +
+  labs(title = "Student-t Model: Actual vs Fitted")
+
+ggplot(newdata, aes(x = mpg, y = pred_gamma)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "green") +
+  labs(title = "Gamma Model: Actual vs Fitted")
+
+ggplot(newdata, aes(x = mpg, y = pred_lognormal)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "orange") +
+  labs(title = "Log-normal Model: Actual vs Fitted")
+
+
+
+
+#--------------------3. Real data--------------
+data("airquality")
+df <- na.omit(airquality)  
+
+# Fit with normal distribution
+model_normal <- brm(Ozone ~ Temp + Wind,
+                    data = df,
+                    family = gaussian(),
+                    save_pars = save_pars(all = TRUE),
+                    chains = 2, iter = 2000, seed = 123)
+
+# Fit with student-t distribution
+model_student <- brm(Ozone ~ Temp + Wind,
+                     data = df,
+                     family = student(),
+                     save_pars = save_pars(all = TRUE),
+                     chains = 2, iter = 2000, seed = 123)
+
+# Fit with gamma distribution (Ozone > 0 required)
+model_gamma <- brm(Ozone ~ Temp + Wind,
+                   data = df,
+                   family = Gamma(link = "log"),
+                   save_pars = save_pars(all = TRUE),
+                   chains = 2, iter = 2000, seed = 123)
+
+# Fit with lognormal distribution
+model_lognormal <- brm(Ozone ~ Temp + Wind,
+                       data = df,
+                       family = lognormal(),
+                       save_pars = save_pars(all = TRUE),
+                       chains = 2, iter = 2000, seed = 123)
+
+# Compute bridge sampling objects
+bridge_normal     <- bridge_sampler(model_normal)
+bridge_student    <- bridge_sampler(model_student)
+bridge_gamma      <- bridge_sampler(model_gamma)
+bridge_lognormal  <- bridge_sampler(model_lognormal)
+
+# Compare via Bayes factors
+bf(student_vs_normal <- bf(bridge_student, bridge_normal))
+bf(gamma_vs_normal   <- bf(bridge_gamma, bridge_normal))
+bf(lognormal_vs_normal <- bf(bridge_lognormal, bridge_normal))
+bf(lognormal_vs_gamma <- bf(bridge_lognormal, bridge_gamma))
+bf(lognormal_vs_student <- bf(bridge_lognormal, bridge_student))
+
+# Add fitted predictions to data
+df$pred_normal     <- fitted(model_normal)[, "Estimate"]
+df$pred_student    <- fitted(model_student)[, "Estimate"]
+df$pred_gamma      <- fitted(model_gamma)[, "Estimate"]
+df$pred_lognormal  <- fitted(model_lognormal)[, "Estimate"]
+
+# Plot: Actual vs Fitted for each model
+ggplot(df, aes(x = Ozone, y = pred_normal)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  labs(title = "Normal Model: Actual vs Fitted")
+
+ggplot(df, aes(x = Ozone, y = pred_student)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "blue") +
+  labs(title = "Student-t Model: Actual vs Fitted")
+
+ggplot(df, aes(x = Ozone, y = pred_gamma)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "green") +
+  labs(title = "Gamma Model: Actual vs Fitted")
+
+ggplot(df, aes(x = Ozone, y = pred_lognormal)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "orange") +
+  labs(title = "Log-normal Model: Actual vs Fitted")
+
+prior_summary(model_normal)
+
+
