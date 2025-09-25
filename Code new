@@ -80,8 +80,8 @@ bridge_lognorm_m2 <- bridge_sampler(L2, silent = TRUE)
 
 
 # vector of all marginal likelihoods
-marginal_likes <- c(bridge_gamma_m1$logml, bridge_gamma_m2$logml, bridge_gamma_m3$logml,
-                    bridge_lognorm_m1$logml, bridge_lognorm_m2$logml, bridge_lognorm_m3$logml)
+marginal_likes <- c(bridge_gamma_m1$logml, bridge_gamma_m2$logml,
+                    bridge_lognorm_m1$logml, bridge_lognorm_m2$logml)
 
 model_names <- c("G1", "G2",  "L1", "L2")
 
