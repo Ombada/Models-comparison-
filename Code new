@@ -1,3 +1,12 @@
+library(brms)
+library(bridgesampling)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(gridExtra)
+library(purrr)
+
+
 # Clean data
 df <- na.omit(airquality)
 library(brms)
