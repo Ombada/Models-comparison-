@@ -1,0 +1,191 @@
+# Clean data
+df <- na.omit(airquality)
+library(brms)
+library(bridgesampling)
+
+# Clean data: remove missing values
+df <- na.omit(airquality)
+# --------------- Priors-----------------------------
+priors_linear <- c(
+  set_prior("normal(1, 1)", class = "Intercept"),
+  set_prior("normal(2, 1)", class = "b", coef = "x"),
+  set_prior("exponential(1)", class = "sigma")
+)
+
+priors_quadratic <- c(
+  set_prior("normal(1, 1)", class = "Intercept"),
+  set_prior("normal(2, 1)", class = "b", coef = "x"),
+  set_prior("normal(1.5, 1)", class = "b", coef = "x2"),
+  set_prior("exponential(1)", class = "sigma")
+)
+
+
+
+# Example 2
+
+# ----------------------Gamma models----------------
+
+G1 <- brm(Ozone ~ Temp,
+          data = df,
+          family = Gamma(link = "log"),
+          chains = 4, iter = 2000, seed = 123)
+
+G2 <- brm(Ozone ~ Temp + Wind,
+          data = df,
+          family = Gamma(link = "log"),
+          chains = 4, iter = 2000, seed = 123)
+
+
+# ------------------Log-Normal models----------------
+
+L1 <- brm(Ozone ~ Temp,
+          data = df,
+          family = lognormal(),
+          chains = 4, iter = 2000, seed = 123)
+
+L2 <- brm(Ozone ~ Temp + Wind,
+          data = df,
+          family = lognormal(),
+          chains = 4, iter = 2000, seed = 123)
+
+
+
+bridge_gamma_m1 <- bridge_sampler(G1, silent = TRUE)
+bridge_gamma_m2 <- bridge_sampler(G2, silent = TRUE)
+
+
+bridge_lognorm_m1 <- bridge_sampler(L1, silent = TRUE)
+bridge_lognorm_m2 <- bridge_sampler(L2, silent = TRUE)
+
+
+
+# vector of all marginal likelihoods
+marginal_likes <- c(bridge_gamma_m1$logml, bridge_gamma_m2$logml, bridge_gamma_m3$logml,
+                    bridge_lognorm_m1$logml, bridge_lognorm_m2$logml, bridge_lognorm_m3$logml)
+
+model_names <- c("G1", "G2",  "L1", "L2")
+
+# reslts  data frame
+results_df <- data.frame(
+  Model = model_names,
+  LogML = marginal_likes,
+  Family = c(rep("Gamma", 2), rep("Lognormal", 2)),
+  Complexity = rep(c("Temp only", "Temp + Wind"), 2)
+)
+
+
+# Function to compute log Bayes factors
+compute_bf_matrix <- function(logml_vector, model_names) {
+  n <- length(logml_vector)
+  bf_matrix <- matrix(0, nrow = n, ncol = n)
+  
+  for(i in 1:n) {
+    for(j in 1:n) {
+      bf_matrix[i,j] <- logml_vector[i] - logml_vector[j]  # log BF_{i,j}
+    }
+  }
+  
+  rownames(bf_matrix) <- model_names
+  colnames(bf_matrix) <- model_names
+  return(bf_matrix)
+}
+
+# Compute BF matrix
+bf_matrix <- compute_bf_matrix(marginal_likes, model_names)
+
+# Convert to long format for ggplot
+bf_long <- melt(bf_matrix, varnames = c("Model1", "Model2"), value.name = "LogBF")
+
+# PLOT 1: HEATMAP ALL Models Comparison 
+
+plot1_heatmap <- ggplot(bf_long, aes(x = Model2, y = Model1, fill = LogBF)) +
+  geom_tile() +
+  geom_text(aes(label = round(LogBF, 2)), color = "white", size = 3) +
+  scale_fill_gradient2(low = "red", mid = "white", high = "blue", 
+                       midpoint = 0, name = "log(BF)") +
+  labs(title = "Bayes Factor Matrix (log scale)",
+       subtitle = "Positive values favor row model over column model",
+       x = "Model (denominator)", y = "Model (numerator)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(plot1_heatmap)
+
+
+# PLOT 2: Model Comparison within Families
+
+# Prepare data for within-family comparison
+gamma_data <- results_df[results_df$Family == "Gamma", ]
+lognorm_data <- results_df[results_df$Family == "Lognormal", ]
+
+# Gamma family comparison
+plot2a_gamma <- ggplot(gamma_data, aes(x = Model, y = LogML)) +
+  geom_col(fill = "steelblue", alpha = 0.7) +
+  geom_text(aes(label = round(LogML, 2)), vjust = -0.5) +
+  labs(title = "Gamma Models Comparison",
+       x = "Model", y = "Log Marginal Likelihood") +
+  theme_minimal()
+
+# Lognormal family comparison  
+plot2b_lognorm <- ggplot(lognorm_data, aes(x = Model, y = LogML)) +
+  geom_col(fill = "coral", alpha = 0.7) +
+  geom_text(aes(label = round(LogML, 2)), vjust = -0.5) +
+  labs(title = "Lognormal Models Comparison",
+       x = "Model", y = "Log Marginal Likelihood") +
+  theme_minimal()
+
+# Combine both plots
+plot2_combined <- grid.arrange(plot2a_gamma, plot2b_lognorm, ncol = 2)
+
+
+# PLOT 3: Distribution Family Comparison (Best Models)
+
+# Find best model in each family
+best_gamma <- gamma_data[which.max(gamma_data$LogML), ]
+best_lognorm <- lognorm_data[which.max(lognorm_data$LogML), ]
+
+best_models <- rbind(best_gamma, best_lognorm)
+
+plot3_families <- ggplot(best_models, aes(x = Family, y = LogML, fill = Family)) +
+  geom_col(alpha = 0.7) +
+  geom_text(aes(label = paste0(Model, "\n", round(LogML, 2))), vjust = -0.5) +
+  scale_fill_manual(values = c("Gamma" = "steelblue", "Lognormal" = "coral")) +
+  labs(title = "Best Model Comparison by Distribution Family",
+       x = "Distribution Family", y = "Log Marginal Likelihood") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(plot3_families)
+
+# PLOT 4: Comprehensive Comparison
+
+plot4_all <- ggplot(results_df, aes(x = Model, y = LogML, fill = Family)) +
+  geom_col(alpha = 0.7, position = "dodge") +
+  geom_text(aes(label = round(LogML, 2)), vjust = -0.5, size = 3) +
+  scale_fill_manual(values = c("Gamma" = "steelblue", "Lognormal" = "coral")) +
+  labs(title = "All Models Comparison",
+       subtitle = "Higher log marginal likelihood indicates better model",
+       x = "Model", y = "Log Marginal Likelihood") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(plot4_all)
+
+# PLOT 5: Bayes Factor Comparison (Relative to baseline)
+
+# Use simplest model (G1) as baseline
+baseline_logml <- results_df$LogML[results_df$Model == "G1"]
+
+results_df$LogBF_vs_G1 <- results_df$LogML - baseline_logml
+
+plot5_relative <- ggplot(results_df, aes(x = Model, y = LogBF_vs_G1, fill = Family)) +
+  geom_col(alpha = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_text(aes(label = round(LogBF_vs_G1, 2)), vjust = -0.5, size = 3) +
+  scale_fill_manual(values = c("Gamma" = "steelblue", "Lognormal" = "coral")) +
+  labs(title = "Bayes Factors Relative to G1 (Baseline)",
+       subtitle = "Positive values indicate better than G1",
+       x = "Model", y = "log(BF) vs G1") +
+  theme_minimal()
+
+print(plot5_relative)
