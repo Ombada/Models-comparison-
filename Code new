@@ -19,6 +19,26 @@ priors_quadratic <- c(
   set_prior("exponential(1)", class = "sigma")
 )
 
+fit_and_bf <- function(df) {
+  fit_lin <- brm(
+    y ~ x,
+    data = df,
+    prior = priors_linear,
+    chains = 4, iter = 2000, warmup = 500,
+    save_pars = save_pars(all = TRUE), refresh = 0
+  )
+  fit_quad <- brm(
+    y ~ x + x2,
+    data = df,
+    prior = priors_quadratic,
+    chains = 4, iter = 2000, warmup = 500,
+    save_pars = save_pars(all = TRUE), refresh = 0
+  )
+  b_lin  <- bridge_sampler(fit_lin, silent = TRUE)
+  b_quad <- bridge_sampler(fit_quad, silent = TRUE)
+  bf_val <- bf(b_quad, b_lin)$bf
+  return(bf_val)
+}
 
 
 # Example 2
