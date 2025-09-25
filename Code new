@@ -41,6 +41,58 @@ fit_and_bf <- function(df) {
 }
 
 
+# ---  repeat for different n ---
+n_values <- c(5, 10, 20, 50, 100)
+reps <- 5  
+
+results <- map_dfr(n_values, function(n) {
+  map_dfr(1:reps, function(r) {
+    x <- rnorm(n)
+    y <- 1 + 2*x + 1.5*x^2 + rnorm(n, sd = 1)
+    df <- data.frame(x = x, x2 = x^2, y = y)
+    bf_val <- fit_and_bf(df)
+    tibble(n = n,
+           rep = r,
+           BF = bf_val,
+           log10_BF = log10(bf_val),
+           selects_quadratic = as.integer(bf_val > 1))
+  })
+})
+
+# --- Summaries ---
+summary_res <- results %>%
+  group_by(n) %>%
+  summarise(prob_select_quad = mean(selects_quadratic),
+            mean_log10_BF = mean(log10_BF),
+            sd_log10_BF = sd(log10_BF),
+            .groups = "drop")
+
+print(summary_res)
+
+# --- Plot both side by side ---
+par(mfrow = c(1, 2))  # 1 row, 2 plots
+
+# Plot 1: Probability of selecting quadratic
+plot(summary_res$n, summary_res$prob_select_quad, type = "b", pch = 19,
+     ylim = c(0, 1),
+     xlab = "Sample size (n)",
+     ylab = "P(select quadratic model)",
+     main = "Selection Probability")
+abline(h = 0.5, lty = 2, col = "red")
+
+# Plot 2: Mean log10 Bayes Factor
+plot(summary_res$n, summary_res$mean_log10_BF, type = "b", pch = 19,
+     xlab = "Sample size (n)",
+     ylab = "Mean log10(BF)",
+     main = "Log10 Bayes Factor")
+arrows(summary_res$n,
+       summary_res$mean_log10_BF - summary_res$sd_log10_BF,
+       summary_res$n,
+       summary_res$mean_log10_BF + summary_res$sd_log10_BF,
+       angle = 90, code = 3, length = 0.05, col = "gray")
+abline(h = 0, lty = 2, col = "red") 
+
+
 # Example 2
 
 # ----------------------Gamma models----------------
